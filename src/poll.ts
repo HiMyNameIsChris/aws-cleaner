@@ -18,39 +18,33 @@ const defaultOptions: PollerFactoryOptions = {
   timeoutMs: 10 * 60 * 1000,
 };
 
-export function getPoller(options?: PollerFactoryOptions): Poller {
+eexport function getPoller(options?: PollerFactoryOptions): Poller {
   const { intervalMs, timeoutMs } = { ...defaultOptions, ...options };
+  const timeoutError = new Error('Timeout exceeded');
+
   return async function poll(predicate: AsyncPredicate, options?: PollerOptions): Promise<void> {
     const description = options?.description;
-    return new Promise(async (resolve, reject) => {
-      const startTime = Date.now();
+    const startTime = Date.now();
+    let durationMs = 0;
+
+    while (true) {
       try {
-        if (await predicate(0)) {
-          resolve();
-        } else {
-          const interval = setInterval(async () => {
-            const durationMs = Date.now() - startTime;
-            if (description) {
-              logger.debug(`Waiting ${formatDuration(durationMs)} for ${description}`);
-            }
-            try {
-              if (await predicate(durationMs)) {
-                clearInterval(interval);
-                resolve();
-              } else if (timeoutMs != null && durationMs > timeoutMs) {
-                clearInterval(interval);
-                reject(new Error(`Timeout exceeded`));
-              }
-            } catch (err) {
-              clearInterval(interval);
-              reject(err);
-            }
-          }, intervalMs);
+        const result = await predicate(durationMs);
+        if (result) {
+          return;
         }
+        if (timeoutMs != null && durationMs > timeoutMs) {
+          throw timeoutError;
+        }
+        if (description) {
+          logger.debug(`Waiting ${formatDuration(durationMs)} for ${description}`);
+        }
+        durationMs = Date.now() - startTime;
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
       } catch (err) {
-        reject(err);
+        throw err;
       }
-    });
+    }
   };
 }
 
